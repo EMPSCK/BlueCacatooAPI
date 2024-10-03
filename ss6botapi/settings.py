@@ -75,7 +75,16 @@ WSGI_APPLICATION = 'ss6botapi.wsgi.application'
 # Database
 # https://docs.djangoproject.com/en/4.2/ref/settings/#databases
 
-
+DATABASES = {
+    'default': {
+        'ENGINE': 'django.db.backends.mysql',
+        'NAME': 'u1059284_ss6bot',
+        'USER': 'u1059284_remote' ,
+        'PASSWORD': 'WEg1M13q8L6V',
+        'HOST': 'server70.hosting.reg.ru',
+        'PORT':'3306',
+    }
+}
 
 
 # Password validation

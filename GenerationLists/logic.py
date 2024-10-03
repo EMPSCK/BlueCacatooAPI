@@ -1,18 +1,35 @@
-from .models import CompetitionJudges
-from GenerationLists.serializers import *
 import random
 import json
-
+from . import config
+import pymysql
 
 def get_ans(data):
     json_end = dict()
+    json_export = dict()
+    group_list = []
 
-    group_list, relatives_list, black_list, judge_counter_list = get_future_tables()
+    group_list_raw = data['groupList']
+    for group_id_inp in group_list_raw:
+        r = get_group_params(data['compId'], group_id_inp)
+        #Не нашли группу
+        if r == "undefinedGroup":
+            json_end['group_number'] =  group_id_inp
+            json_end['status'] = "fail"
+            json_end['judge_id'] = []
+            json_export[group_id_inp] = json_end
+        else:
+            group_list.append(r)
+
+        #Все группы не пробились
+    if group_list == []:
+        return json.loads(json.dumps(json_export))
+
+    relatives_list, black_list, judge_counter_list = get_future_tables()
     comp_region_id = data['regionId']
     relatives_dict = relatives_list_change(relatives_list)
 
     # 1. сортировка входящего списка групп в зависимости от требуемой для судейства категории
-    group_list = dict(sorted(group_list.items(), key=lambda item: item[1]['min_category'], reverse=True))
+    group_list.sort(key=lambda x: x[2] * -1)
 
     # 2. запрашиваем и обрабатываем список судей
     ans = get_all_judges_yana(data['compId'])
@@ -20,13 +37,14 @@ def get_ans(data):
     all_judges_list = {}  # преобразуем словарь для более удобной работы, создаем общий список доступных для выбора судей с параметрами
 
     for i in ans:
-        i['SPORT_Category_decoded'] = decode_category(i['sport_category'])
+        i['SPORT_Category_decoded'] = decode_category(i['SPORT_Category'])
         all_judges_list[i['id']] = i
 
     s = 0
 
     # 3. начинаем работать с каждой группой из переданного списка
     for i in group_list:
+        json_end = dict()
 
         s += 1
         if s == 0: sucess_result = 0
@@ -45,14 +63,14 @@ def get_ans(data):
             regions = {}  # счетчик судейств по регионам
 
         # определяем параметры группы
-        min_category = group_list[i]['min_category']
-        otd_num = group_list[i]['otd_num']
-        n_judges = group_list[i]['n_judges']
+        n_judges, min_category = i[1], i[2]
+        #otd_num = group_list[i]['otd_num']
 
-        group_number = i
+        group_number = i[0]
         n_judges_category = 0
 
         # определяем условия на регионы судей
+        print(n_judges, 11111111111111111)
         n_jud_comp_region, n_jud_other_region = rc_a_region_rules(comp_region_id, n_judges)
 
         group_all_judges_list = judges_category_filter(group_all_judges_list,
@@ -74,23 +92,23 @@ def get_ans(data):
                     n_judges_category += 1  # количество набранных судей в категорию увеличилось на 1
 
                     # добавили информацию о регионе судьи в словарь по регионам
-                    if try_judge_data['regionid'] in regions:
-                        regions[try_judge_data['regionid']] += 1
-                        if try_judge_data['regionid'] == comp_region_id and regions[try_judge_data[
-                            'regionid']] == n_jud_comp_region:  # если судья из "домашнего" региона и при его добавлении лимит для региона исчерпан
+                    if try_judge_data['RegionId'] in regions:
+                        regions[try_judge_data['RegionId']] += 1
+                        if try_judge_data['RegionId'] == comp_region_id and regions[try_judge_data[
+                            'RegionId']] == n_jud_comp_region:  # если судья из "домашнего" региона и при его добавлении лимит для региона исчерпан
                             # ФУНКЦИЯ удаляем всех судей с таким же регионом
                             group_all_judges_list = delete_region_from_judges(group_all_judges_list,
-                                                                              try_judge_data['regionid'])
-                        elif try_judge_data['regionid'] != comp_region_id and regions[
-                            try_judge_data['regionid']] == n_jud_other_region:
+                                                                              try_judge_data['RegionId'])
+                        elif try_judge_data['RegionId'] != comp_region_id and regions[
+                            try_judge_data['RegionId']] == n_jud_other_region:
                             # ФУНКЦИЯ удаляем всех судей с таким же регионом
                             group_all_judges_list = delete_region_from_judges(group_all_judges_list,
-                                                                              try_judge_data['regionid'])
+                                                                              try_judge_data['RegionId'])
                     else:
-                        regions[try_judge_data['regionid']] = 1
+                        regions[try_judge_data['RegionId']] = 1
 
                     # удалили всех с таким же клубом
-                    group_all_judges_list = delete_club_from_judges(group_all_judges_list, try_judge_data['club'])
+                    group_all_judges_list = delete_club_from_judges(group_all_judges_list, try_judge_data['Club'])
 
                     # обновляем данные о судях, доступных для выбора
                     group_all_judges_list.pop(try_judge_data['id'],
@@ -109,15 +127,44 @@ def get_ans(data):
 
             json_end['group_number'] = group_number
             json_end['status'] = "success"
+            json_end['judge_id'] = list()
             for i in group_finish_judges_list:
-                json_end['judge_id'] = all_judges_list[i]['id']
+                json_end['judge_id'].append(all_judges_list[i]['id'])
             print('Распределение регионов', regions)
         else:
             sucess_result = 0
             json_end['group_number'] = group_number
             json_end['status'] = "fail"
 
-    return json.loads(json.dumps(json_end))
+        json_export[group_number] = json_end
+
+    return json.loads(json.dumps(json_export))
+
+#получить параметр групп по турниру и номеру
+def get_group_params(comp_id, group_id):
+    try:
+        conn = pymysql.connect(
+            host=config.host,
+            port=3306,
+            user=config.user,
+            password=config.password,
+            database=config.db_name,
+            cursorclass=pymysql.cursors.DictCursor
+        )
+        with conn:
+            cur = conn.cursor()
+            cur.execute(
+                f'''SELECT groupId, groupNumber,judges, minCategoryId
+                 from competition_group
+                 WHERE compId = {comp_id} and groupId = {group_id}
+                                        ''')
+            data = cur.fetchone()
+            if data is None:
+                return "undefinedGroup"
+            else:
+                return data['groupId'], data['judges'], data['minCategoryId']
+    except:
+        return 0
 
 #функция для ограничения на регионы
 def rc_a_region_rules(comp_region_id, n_judges):
@@ -133,13 +180,13 @@ def rc_a_region_rules(comp_region_id, n_judges):
 
 #костыль пока не таблиц в БД
 def get_future_tables():
-    group_list = {
-        21: {'name': 'Мужчины и женщины латиноамериканская программа', 'min_category': 8, 'otd_num': 11,
-             'n_judges': 11},
-        22: {'name': 'Мужчины и женщины европейская программа', 'min_category': 7, 'otd_num': 11, 'n_judges': 9},
+    #group_list = {
+        #21: {'name': 'Мужчины и женщины латиноамериканская программа', 'min_category': 8, 'otd_num': 11,
+    #     'n_judges': 11},
+        #22: {'name': 'Мужчины и женщины европейская программа', 'min_category': 7, 'otd_num': 11, 'n_judges': 9},
         # 23: {'name': 'Мужчины и женщины двоеборье', 'min_category': 5, 'otd_num' : 11, 'n_judges': 9},
         # 24: {'name': 'Мужчины и женщины сальса', 'min_category': 7, 'otd_num' : 11, 'n_judges': 9}
-    }
+    #}
 
     relatives_list = [
         {'id': 1,
@@ -158,21 +205,38 @@ def get_future_tables():
     ]
 
     judge_counter_list = [{'otd_num': 11, 'id': i, 'jud_entries': 0} for i in range(1, 101)]
-    return group_list, relatives_list, black_list, judge_counter_list
+    return relatives_list, black_list, judge_counter_list
 
 def get_all_judges_yana(compId):
-    queryset = CompetitionJudges.objects.filter(compid=compId)
-    serializer = JudgesSerializer(queryset, many=True)
-    return serializer.data
+    try:
+        conn = pymysql.connect(
+            host=config.host,
+            port=3306,
+            user=config.user,
+            password=config.password,
+            database=config.db_name,
+            cursorclass=pymysql.cursors.DictCursor
+        )
+        with conn:
+            cur = conn.cursor()
+            cur.execute(
+               f"SELECT id, lastName, firstName, SPORT_Category, RegionId, Club, bookNumber FROM competition_judges WHERE compId = {compId}")  # выбираем только активных на данный момент судей
+            data = cur.fetchall()
+            return data
+
+    except Exception as e:
+        print(e)
+        return 0
 
 #преобразование категории судьи
 def decode_category(category_name):
 
     judge_category = {
-        'Всероссийская' :8,
-        'Первая' : 7,
-        'Вторая' : 6,
-        'Третья' : 5
+        'Всероссийская' :6,
+        'Первая' : 5,
+        'Вторая' : 4,
+        'Третья' : 3,
+        'Четвертая': 2
     }
 
     try:
@@ -214,7 +278,7 @@ def get_random_judge(group_all_judges_list):
 def delete_club_from_judges(list_of_judges, club_name):
   dict_for_pop = list_of_judges.copy()
   for i in list(list_of_judges.values()):
-    if i['club'] == club_name:
+    if i['Club'] == club_name:
       dict_for_pop.pop(i['id'], None)
   return dict_for_pop
 
@@ -224,7 +288,7 @@ def delete_region_from_judges(list_of_judges, region_id):
 
   dict_for_pop = list_of_judges.copy()
   for i in list(list_of_judges.values()):
-    if i['regionid'] == region_id:
+    if i['RegionId'] == region_id:
       dict_for_pop.pop(i['id'], None)
   return dict_for_pop
 
