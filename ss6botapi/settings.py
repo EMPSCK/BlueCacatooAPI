@@ -77,11 +77,11 @@ WSGI_APPLICATION = 'ss6botapi.wsgi.application'
 
 DATABASES = {
     'default': {
-        'ENGINE': 'django.db.backends.mysql',
-        'NAME': 'u1059284_ss6bot',
-        'USER': 'u1059284_remote' ,
-        'PASSWORD': 'WEg1M13q8L6V',
-        'HOST': 'server70.hosting.reg.ru',
+        'ENGINE': '',
+        'NAME': '',
+        'USER': '' ,
+        'PASSWORD': '',
+        'HOST': '',
         'PORT':'3306',
     }
 }

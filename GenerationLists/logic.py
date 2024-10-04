@@ -70,7 +70,6 @@ def get_ans(data):
         n_judges_category = 0
 
         # определяем условия на регионы судей
-        print(n_judges, 11111111111111111)
         n_jud_comp_region, n_jud_other_region = rc_a_region_rules(comp_region_id, n_judges)
 
         group_all_judges_list = judges_category_filter(group_all_judges_list,
